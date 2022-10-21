@@ -1,22 +1,54 @@
-const express = require('express');
-const { Server } = require('ws');
+const WebSocket = require('ws')
 
-const PORT = process.env.PORT || 3000;
-const INDEX = '/index.html';
+// create new websocket server
+const wss = new WebSocket.Server({port: 8000})
 
-const server = express()
-  .use((req, res) => res.sendFile(INDEX, { root: __dirname }))
-  .listen(PORT, () => console.log(`Listening on ${PORT}`));
+// empty object to store all players
+var players = {}
 
-const wss = new Server({ server });
+// add general WebSocket error handler
+wss.on('error', function error (error) {
+  console.error('WebSocket error', error)
+})
 
-wss.on('connection', (ws) => {
-  console.log('Client connected');
-  ws.on('close', () => console.log('Client disconnected'));
-});
+// on new client connect
+wss.on('connection', function connection (client) {
+  console.log('new client connected')
+  // on new message recieved
+  client.on('message', function incoming (data) {
+    // get data from string
+    var [udid, x, y, z] = data.toString().split('\t')
+    // store data to players object
+    players[udid] = {
+      position: {
+        x: parseFloat(x),
+        y: parseFloat(y),
+        z: parseFloat(z)
+      },
+      
+      timestamp: Date.now()
+      
+    }
+    //console.log('Client rotation');
+    // save player udid to the client
+    client.udid = udid
+  })
+})
 
-setInterval(() => {
-  wss.clients.forEach((client) => {
-    client.send(new Date().toTimeString());
-  });
-}, 1000);
+function broadcastUpdate () {
+  // broadcast messages to all clients
+  wss.clients.forEach(function each (client) {
+    // filter disconnected clients
+    if (client.readyState !== WebSocket.OPEN) return
+    // filter out current player by client.udid
+    var otherPlayers = Object.keys(players).filter(udid => udid !== client.udid)
+    // create array from the rest
+    var otherPlayersPositions = otherPlayers.map(udid => players[udid])
+  //var otherPlayersRotation = otherPlayers.map(udid => players[udid])
+    // send it
+    client.send(JSON.stringify({players: otherPlayersPositions}))
+  })
+}
+
+// call broadcastUpdate every 0.1s
+setInterval(broadcastUpdate, 100)
